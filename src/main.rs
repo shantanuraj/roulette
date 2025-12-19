@@ -7,6 +7,8 @@ use axum::{
 };
 use rand::{distributions::WeightedIndex, prelude::*};
 use std::{collections::HashMap, env, fs, sync::Arc};
+use tower_http::trace::TraceLayer;
+use tracing::info;
 
 const EMBEDDED_IMAGE_MAP: &str = include_str!("../image-map.json");
 
@@ -91,14 +93,20 @@ async fn latest_image_after(State(state): State<Arc<AppState>>, Path(bound): Pat
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     let state = Arc::new(AppState::load());
+    info!(images = state.sorted_keys.len(), "loaded image map");
     let app = Router::new()
         .route("/image", get(random_image))
         .route("/image/after/{bound}", get(random_image_after))
         .route("/image/latest", get(latest_image))
         .route("/image/latest/after/{bound}", get(latest_image_after))
+        .layer(TraceLayer::new_for_http())
         .with_state(state);
     let port: u16 = env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3000);
+    info!(port, "starting server");
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
