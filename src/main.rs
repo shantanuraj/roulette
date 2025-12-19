@@ -6,7 +6,14 @@ use axum::{
     Router,
 };
 use rand::{distributions::WeightedIndex, prelude::*};
-use std::{collections::HashMap, env, fs, hash::{Hash, Hasher}, sync::Arc, sync::RwLock, time::Duration};
+use std::{
+    collections::HashMap,
+    env, fs,
+    hash::{Hash, Hasher},
+    sync::Arc,
+    sync::RwLock,
+    time::Duration,
+};
 use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
@@ -30,7 +37,11 @@ impl ImageMap {
         let map: HashMap<String, String> = serde_json::from_str(content)?;
         let mut sorted_keys: Vec<String> = map.keys().cloned().collect();
         sorted_keys.sort();
-        Ok(Self { sorted_keys, map, content_hash: hash_content(content) })
+        Ok(Self {
+            sorted_keys,
+            map,
+            content_hash: hash_content(content),
+        })
     }
 }
 
@@ -46,7 +57,10 @@ impl AppState {
             .map(|p| fs::read_to_string(p).expect("failed to read image map"))
             .unwrap_or_else(|_| EMBEDDED_IMAGE_MAP.to_string());
         let image_map = ImageMap::parse(&content).expect("invalid JSON");
-        Self { url_prefix, image_map: RwLock::new(image_map) }
+        Self {
+            url_prefix,
+            image_map: RwLock::new(image_map),
+        }
     }
 
     fn redirect(&self, key: &str, map: &HashMap<String, String>) -> Response {
@@ -85,7 +99,10 @@ async fn random_image(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
-async fn random_image_after(State(state): State<Arc<AppState>>, Path(bound): Path<String>) -> Response {
+async fn random_image_after(
+    State(state): State<Arc<AppState>>,
+    Path(bound): Path<String>,
+) -> Response {
     let guard = state.image_map.read().unwrap();
     let keys = filter_after(&guard.sorted_keys, &bound);
     match select_uniform(keys) {
@@ -102,7 +119,10 @@ async fn latest_image(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
-async fn latest_image_after(State(state): State<Arc<AppState>>, Path(bound): Path<String>) -> Response {
+async fn latest_image_after(
+    State(state): State<Arc<AppState>>,
+    Path(bound): Path<String>,
+) -> Response {
     let guard = state.image_map.read().unwrap();
     let keys = filter_after(&guard.sorted_keys, &bound);
     match select_biased(keys) {
@@ -112,13 +132,24 @@ async fn latest_image_after(State(state): State<Arc<AppState>>, Path(bound): Pat
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> String {
-    state.image_map.read().unwrap().sorted_keys.len().to_string()
+    state
+        .image_map
+        .read()
+        .unwrap()
+        .sorted_keys
+        .len()
+        .to_string()
 }
 
 async fn sync_loop(state: Arc<AppState>, url: String, interval: Duration) {
     let client = reqwest::Client::new();
     loop {
-        match client.get(&url).send().await.and_then(|r| r.error_for_status()) {
+        match client
+            .get(&url)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+        {
             Ok(resp) => match resp.text().await {
                 Ok(content) => {
                     let new_hash = hash_content(&content);
@@ -143,7 +174,9 @@ async fn sync_loop(state: Arc<AppState>, url: String, interval: Duration) {
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        signal::ctrl_c().await.expect("failed to install ctrl+c handler");
+        signal::ctrl_c()
+            .await
+            .expect("failed to install ctrl+c handler");
     };
     #[cfg(unix)]
     let terminate = async {
@@ -168,9 +201,18 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let state = Arc::new(AppState::load());
-    info!(images = state.image_map.read().unwrap().sorted_keys.len(), "loaded image map");
-    if let (Ok(url), Ok(secs)) = (env::var("IMAGE_MAP_SYNC_URL"), env::var("IMAGE_MAP_SYNC_INTERVAL")) {
-        let interval = Duration::from_secs(secs.parse().expect("IMAGE_MAP_SYNC_INTERVAL must be seconds"));
+    info!(
+        images = state.image_map.read().unwrap().sorted_keys.len(),
+        "loaded image map"
+    );
+    if let (Ok(url), Ok(secs)) = (
+        env::var("IMAGE_MAP_SYNC_URL"),
+        env::var("IMAGE_MAP_SYNC_INTERVAL"),
+    ) {
+        let interval = Duration::from_secs(
+            secs.parse()
+                .expect("IMAGE_MAP_SYNC_INTERVAL must be seconds"),
+        );
         info!(%url, ?interval, "starting sync loop");
         tokio::spawn(sync_loop(state.clone(), url, interval));
     }
@@ -182,11 +224,19 @@ async fn main() {
         .route("/image/latest/after/{bound}", get(latest_image_after))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
-    let port: u16 = env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
+    let port: u16 = env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8080);
     info!(port, "starting server");
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
+        .await
+        .unwrap();
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
 }
+
+#[cfg(test)]
+mod tests;
