@@ -6,17 +6,37 @@ use axum::{
     Router,
 };
 use rand::{distributions::WeightedIndex, prelude::*};
-use std::{collections::HashMap, env, fs, sync::Arc};
+use std::{collections::HashMap, env, fs, hash::{Hash, Hasher}, sync::Arc, sync::RwLock, time::Duration};
 use tokio::signal;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{info, warn};
 
 const EMBEDDED_IMAGE_MAP: &str = include_str!("../image-map.json");
 
-struct AppState {
-    url_prefix: String,
+fn hash_content(content: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    content.hash(&mut hasher);
+    hasher.finish()
+}
+
+struct ImageMap {
     sorted_keys: Vec<String>,
     map: HashMap<String, String>,
+    content_hash: u64,
+}
+
+impl ImageMap {
+    fn parse(content: &str) -> Result<Self, serde_json::Error> {
+        let map: HashMap<String, String> = serde_json::from_str(content)?;
+        let mut sorted_keys: Vec<String> = map.keys().cloned().collect();
+        sorted_keys.sort();
+        Ok(Self { sorted_keys, map, content_hash: hash_content(content) })
+    }
+}
+
+struct AppState {
+    url_prefix: String,
+    image_map: RwLock<ImageMap>,
 }
 
 impl AppState {
@@ -25,74 +45,100 @@ impl AppState {
         let content = env::var("IMAGE_MAP_PATH")
             .map(|p| fs::read_to_string(p).expect("failed to read image map"))
             .unwrap_or_else(|_| EMBEDDED_IMAGE_MAP.to_string());
-        let map: HashMap<String, String> = serde_json::from_str(&content).expect("invalid JSON");
-        let mut sorted_keys: Vec<String> = map.keys().cloned().collect();
-        sorted_keys.sort();
-        Self { url_prefix, sorted_keys, map }
+        let image_map = ImageMap::parse(&content).expect("invalid JSON");
+        Self { url_prefix, image_map: RwLock::new(image_map) }
     }
 
-    fn select_uniform<'a>(&self, keys: &'a [String]) -> Option<&'a str> {
-        if keys.is_empty() {
-            return None;
-        }
-        let idx = thread_rng().gen_range(0..keys.len());
-        Some(&keys[idx])
-    }
-
-    fn select_biased<'a>(&self, keys: &'a [String]) -> Option<&'a str> {
-        if keys.is_empty() {
-            return None;
-        }
-        let decay = 0.05;
-        let weights: Vec<f64> = (0..keys.len()).map(|i| (i as f64 * decay).exp()).collect();
-        let dist = WeightedIndex::new(&weights).ok()?;
-        Some(&keys[thread_rng().sample(dist)])
-    }
-
-    fn filter_after(&self, bound: &str) -> &[String] {
-        let start = self.sorted_keys.partition_point(|k| k.as_str() < bound);
-        &self.sorted_keys[start..]
-    }
-
-    fn redirect(&self, key: &str) -> Response {
-        let filename = &self.map[key];
-        let url = format!("{}/{}", self.url_prefix, filename);
+    fn redirect(&self, key: &str, map: &HashMap<String, String>) -> Response {
+        let url = format!("{}/{}", self.url_prefix, map[key]);
         (StatusCode::FOUND, [(header::LOCATION, url)]).into_response()
     }
 }
 
+fn select_uniform(keys: &[String]) -> Option<&str> {
+    if keys.is_empty() {
+        return None;
+    }
+    Some(&keys[thread_rng().gen_range(0..keys.len())])
+}
+
+fn select_biased(keys: &[String]) -> Option<&str> {
+    if keys.is_empty() {
+        return None;
+    }
+    let decay = 0.05;
+    let weights: Vec<f64> = (0..keys.len()).map(|i| (i as f64 * decay).exp()).collect();
+    let dist = WeightedIndex::new(&weights).ok()?;
+    Some(&keys[thread_rng().sample(dist)])
+}
+
+fn filter_after<'a>(keys: &'a [String], bound: &str) -> &'a [String] {
+    let start = keys.partition_point(|k| k.as_str() < bound);
+    &keys[start..]
+}
+
 async fn random_image(State(state): State<Arc<AppState>>) -> Response {
-    match state.select_uniform(&state.sorted_keys) {
-        Some(key) => state.redirect(key),
+    let guard = state.image_map.read().unwrap();
+    match select_uniform(&guard.sorted_keys) {
+        Some(key) => state.redirect(key, &guard.map),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn random_image_after(State(state): State<Arc<AppState>>, Path(bound): Path<String>) -> Response {
-    let keys = state.filter_after(&bound);
-    match state.select_uniform(keys) {
-        Some(key) => state.redirect(key),
+    let guard = state.image_map.read().unwrap();
+    let keys = filter_after(&guard.sorted_keys, &bound);
+    match select_uniform(keys) {
+        Some(key) => state.redirect(key, &guard.map),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn latest_image(State(state): State<Arc<AppState>>) -> Response {
-    match state.select_biased(&state.sorted_keys) {
-        Some(key) => state.redirect(key),
+    let guard = state.image_map.read().unwrap();
+    match select_biased(&guard.sorted_keys) {
+        Some(key) => state.redirect(key, &guard.map),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn latest_image_after(State(state): State<Arc<AppState>>, Path(bound): Path<String>) -> Response {
-    let keys = state.filter_after(&bound);
-    match state.select_biased(keys) {
-        Some(key) => state.redirect(key),
+    let guard = state.image_map.read().unwrap();
+    let keys = filter_after(&guard.sorted_keys, &bound);
+    match select_biased(keys) {
+        Some(key) => state.redirect(key, &guard.map),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn health() -> StatusCode {
     StatusCode::OK
+}
+
+async fn sync_loop(state: Arc<AppState>, url: String, interval: Duration) {
+    let client = reqwest::Client::new();
+    loop {
+        tokio::time::sleep(interval).await;
+        match client.get(&url).send().await.and_then(|r| r.error_for_status()) {
+            Ok(resp) => match resp.text().await {
+                Ok(content) => {
+                    let new_hash = hash_content(&content);
+                    if new_hash == state.image_map.read().unwrap().content_hash {
+                        continue;
+                    }
+                    match ImageMap::parse(&content) {
+                        Ok(new_map) => {
+                            info!(images = new_map.sorted_keys.len(), "synced image map");
+                            *state.image_map.write().unwrap() = new_map;
+                        }
+                        Err(e) => warn!(error = %e, "sync failed: invalid JSON"),
+                    }
+                }
+                Err(e) => warn!(error = %e, "sync failed: read error"),
+            },
+            Err(e) => warn!(error = %e, "sync failed: fetch error"),
+        }
+    }
 }
 
 async fn shutdown_signal() {
@@ -122,7 +168,12 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let state = Arc::new(AppState::load());
-    info!(images = state.sorted_keys.len(), "loaded image map");
+    info!(images = state.image_map.read().unwrap().sorted_keys.len(), "loaded image map");
+    if let (Ok(url), Ok(secs)) = (env::var("IMAGE_MAP_SYNC_URL"), env::var("IMAGE_MAP_SYNC_INTERVAL")) {
+        let interval = Duration::from_secs(secs.parse().expect("IMAGE_MAP_SYNC_INTERVAL must be seconds"));
+        info!(%url, ?interval, "starting sync loop");
+        tokio::spawn(sync_loop(state.clone(), url, interval));
+    }
     let app = Router::new()
         .route("/health", get(health))
         .route("/image", get(random_image))

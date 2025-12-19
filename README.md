@@ -36,8 +36,8 @@ Images are defined in a JSON file (image-map.json) loaded at startup.
 Only the values are used to construct the final URL.
 Keys are retained for traceability and potential future metadata use.
 
-The map is loaded once and kept in memory.
-No filesystem or network access is performed on request paths.
+The map is loaded at startup and kept in memory.
+Optional background sync can reload the map from a remote URL without restart.
 
 ## URL Resolution
 
@@ -63,6 +63,10 @@ The service is intentionally storage-agnostic. Any object store or CDN can be
 used as long as it serves static assets over HTTP(S).
 
 ## HTTP API
+
+### GET `/health`
+
+Returns `200 OK` for health checks and load balancer probes.
 
 ### GET `/image`
 
@@ -173,11 +177,14 @@ The goal is:
 
 ### Configuration
 
-| Environment Variable | Required | Description                                            |
-| -------------------- | -------- | ------------------------------------------------------ |
-| `IMAGE_URL_PREFIX`   | yes      | Base URL used to resolve image filenames               |
-| `IMAGE_MAP_PATH`     | no       | Path to `image-map.json` (default: `./image-map.json`) |
-| `PORT`               | no       | Port to bind the HTTP server (default: `8080`)         |
+| Environment Variable      | Required | Description                                                  |
+| ------------------------- | -------- | ------------------------------------------------------------ |
+| `IMAGE_URL_PREFIX`        | yes      | Base URL used to resolve image filenames                     |
+| `IMAGE_MAP_PATH`          | no       | Path to `image-map.json` (default: embedded at compile time) |
+| `IMAGE_MAP_SYNC_URL`      | no       | URL to fetch updated image map from                          |
+| `IMAGE_MAP_SYNC_INTERVAL` | no       | Sync interval in seconds (requires `IMAGE_MAP_SYNC_URL`)     |
+| `PORT`                    | no       | Port to bind the HTTP server (default: `8080`)               |
+| `RUST_LOG`                | no       | Log level filter (e.g. `info`, `debug`, `tower_http=debug`)  |
 
 ## Framework & Runtime
 
@@ -187,7 +194,7 @@ Web framework: axum
 
 Concurrency model: async (Tokio)
 
-State: immutable, in-memory image map shared via Arc
+State: in-memory image map behind RwLock, hot-reloadable via sync
 
 The request path performs no allocations beyond RNG and header construction.
 
@@ -197,11 +204,13 @@ The request path performs no allocations beyond RNG and header construction.
 - No image data handled by the service
 - O(1) request handling
 - Suitable for serverless or containerized deployment
+- Health endpoint at `/health` for load balancer probes
+- Graceful shutdown on SIGTERM/SIGINT
+- Optional hot reload via `IMAGE_MAP_SYNC_URL`
 - Easy to extend with:
   - rate limiting
   - weighted randomness
   - multiple endpoints
-  - hot reload of the image map
 
 ### Non-goals (for now)
 
