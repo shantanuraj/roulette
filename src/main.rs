@@ -118,7 +118,6 @@ async fn health(State(state): State<Arc<AppState>>) -> String {
 async fn sync_loop(state: Arc<AppState>, url: String, interval: Duration) {
     let client = reqwest::Client::new();
     loop {
-        tokio::time::sleep(interval).await;
         match client.get(&url).send().await.and_then(|r| r.error_for_status()) {
             Ok(resp) => match resp.text().await {
                 Ok(content) => {
@@ -138,6 +137,7 @@ async fn sync_loop(state: Arc<AppState>, url: String, interval: Duration) {
             },
             Err(e) => warn!(error = %e, "sync failed: fetch error"),
         }
+        tokio::time::sleep(interval).await;
     }
 }
 
