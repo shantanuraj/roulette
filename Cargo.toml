@@ -2,6 +2,9 @@
 name = "roulette"
 version = "0.1.0"
 edition = "2021"
+description = "HTTP service that redirects to random images"
+license = "MIT"
+repository = "https://github.com/shantanuraj/roulette"
 
 [dependencies]
 axum = "0.8"

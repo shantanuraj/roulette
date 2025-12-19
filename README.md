@@ -6,6 +6,17 @@ HTTP redirect to an externally hosted asset.
 The service exists to avoid publishing the full image index to clients while
 keeping image delivery off the application server.
 
+## Motivation
+
+My primary use case is serving a random photo for a personal website, reading
+from a large catalog that would be impractical to embed in a static site;
+and would still require JavaScript on the client side to select an image.
+
+In theory, we are not limited to images; any static asset type could be served
+where random selection is desired without exposing the full index.
+The asset doesn't even have to be static, as long as the URL resolves to a valid
+resource and can respond to a `GET` request.
+
 ## Architecture Overview
 
 ```
