@@ -111,8 +111,8 @@ async fn latest_image_after(State(state): State<Arc<AppState>>, Path(bound): Pat
     }
 }
 
-async fn health() -> StatusCode {
-    StatusCode::OK
+async fn health(State(state): State<Arc<AppState>>) -> String {
+    state.image_map.read().unwrap().sorted_keys.len().to_string()
 }
 
 async fn sync_loop(state: Arc<AppState>, url: String, interval: Duration) {

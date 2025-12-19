@@ -67,6 +67,7 @@ used as long as it serves static assets over HTTP(S).
 ### GET `/health`
 
 Returns `200 OK` for health checks and load balancer probes.
+Reports total number of loaded images in the body.
 
 ### GET `/image`
 
