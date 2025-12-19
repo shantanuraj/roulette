@@ -7,6 +7,7 @@ use axum::{
 };
 use rand::{distributions::WeightedIndex, prelude::*};
 use std::{collections::HashMap, env, fs, sync::Arc};
+use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -90,6 +91,30 @@ async fn latest_image_after(State(state): State<Arc<AppState>>, Path(bound): Pat
     }
 }
 
+async fn health() -> StatusCode {
+    StatusCode::OK
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c().await.expect("failed to install ctrl+c handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+    info!("shutdown signal received");
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -99,6 +124,7 @@ async fn main() {
     let state = Arc::new(AppState::load());
     info!(images = state.sorted_keys.len(), "loaded image map");
     let app = Router::new()
+        .route("/health", get(health))
         .route("/image", get(random_image))
         .route("/image/after/{bound}", get(random_image_after))
         .route("/image/latest", get(latest_image))
@@ -108,5 +134,8 @@ async fn main() {
     let port: u16 = env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3000);
     info!(port, "starting server");
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
 }
