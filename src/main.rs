@@ -1,11 +1,12 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Router,
 };
 use rand::{distributions::WeightedIndex, prelude::*};
+use serde::Deserialize;
 use std::{
     collections::HashMap,
     env, fs,
@@ -17,6 +18,24 @@ use std::{
 use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
+
+#[derive(Deserialize, Default)]
+struct CacheQuery {
+    cache: Option<String>,
+}
+
+fn parse_duration(s: &str) -> Option<u64> {
+    let s = s.trim();
+    let (num, suffix) = s.split_at(s.len().saturating_sub(1));
+    let value: u64 = num.parse().ok()?;
+    match suffix {
+        "s" => Some(value),
+        "m" => Some(value * 60),
+        "h" => Some(value * 3600),
+        "d" => Some(value * 86400),
+        _ => None,
+    }
+}
 
 const EMBEDDED_IMAGE_MAP: &str = include_str!("../image-map.json");
 
@@ -63,9 +82,24 @@ impl AppState {
         }
     }
 
-    fn redirect(&self, key: &str, map: &HashMap<String, String>) -> Response {
+    fn redirect(
+        &self,
+        key: &str,
+        map: &HashMap<String, String>,
+        cache_secs: Option<u64>,
+    ) -> Response {
         let url = format!("{}/{}", self.url_prefix, map[key]);
-        (StatusCode::FOUND, [(header::LOCATION, url)]).into_response()
+        match cache_secs {
+            Some(secs) => (
+                StatusCode::FOUND,
+                [
+                    (header::LOCATION, url),
+                    (header::CACHE_CONTROL, format!("public, max-age={}", secs)),
+                ],
+            )
+                .into_response(),
+            None => (StatusCode::FOUND, [(header::LOCATION, url)]).into_response(),
+        }
     }
 }
 
@@ -91,10 +125,11 @@ fn filter_after<'a>(keys: &'a [String], bound: &str) -> &'a [String] {
     &keys[start..]
 }
 
-async fn random_image(State(state): State<Arc<AppState>>) -> Response {
+async fn random_image(State(state): State<Arc<AppState>>, Query(q): Query<CacheQuery>) -> Response {
+    let cache = q.cache.as_deref().and_then(parse_duration);
     let guard = state.image_map.read().unwrap();
     match select_uniform(&guard.sorted_keys) {
-        Some(key) => state.redirect(key, &guard.map),
+        Some(key) => state.redirect(key, &guard.map, cache),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -102,19 +137,22 @@ async fn random_image(State(state): State<Arc<AppState>>) -> Response {
 async fn random_image_after(
     State(state): State<Arc<AppState>>,
     Path(bound): Path<String>,
+    Query(q): Query<CacheQuery>,
 ) -> Response {
+    let cache = q.cache.as_deref().and_then(parse_duration);
     let guard = state.image_map.read().unwrap();
     let keys = filter_after(&guard.sorted_keys, &bound);
     match select_uniform(keys) {
-        Some(key) => state.redirect(key, &guard.map),
+        Some(key) => state.redirect(key, &guard.map, cache),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-async fn latest_image(State(state): State<Arc<AppState>>) -> Response {
+async fn latest_image(State(state): State<Arc<AppState>>, Query(q): Query<CacheQuery>) -> Response {
+    let cache = q.cache.as_deref().and_then(parse_duration);
     let guard = state.image_map.read().unwrap();
     match select_biased(&guard.sorted_keys) {
-        Some(key) => state.redirect(key, &guard.map),
+        Some(key) => state.redirect(key, &guard.map, cache),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -122,11 +160,13 @@ async fn latest_image(State(state): State<Arc<AppState>>) -> Response {
 async fn latest_image_after(
     State(state): State<Arc<AppState>>,
     Path(bound): Path<String>,
+    Query(q): Query<CacheQuery>,
 ) -> Response {
+    let cache = q.cache.as_deref().and_then(parse_duration);
     let guard = state.image_map.read().unwrap();
     let keys = filter_after(&guard.sorted_keys, &bound);
     match select_biased(keys) {
-        Some(key) => state.redirect(key, &guard.map),
+        Some(key) => state.redirect(key, &guard.map, cache),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }

@@ -97,3 +97,29 @@ fn hash_deterministic() {
 fn hash_differs_for_different_content() {
     assert_ne!(hash_content(r#"{"a": "b"}"#), hash_content(r#"{"a": "c"}"#));
 }
+
+#[test]
+fn parse_duration_seconds() {
+    assert_eq!(parse_duration("60s"), Some(60));
+}
+
+#[test]
+fn parse_duration_minutes() {
+    assert_eq!(parse_duration("5m"), Some(300));
+}
+
+#[test]
+fn parse_duration_hours() {
+    assert_eq!(parse_duration("1h"), Some(3600));
+}
+
+#[test]
+fn parse_duration_days() {
+    assert_eq!(parse_duration("7d"), Some(604800));
+}
+
+#[test]
+fn parse_duration_invalid() {
+    assert_eq!(parse_duration("invalid"), None);
+    assert_eq!(parse_duration("10x"), None);
+}

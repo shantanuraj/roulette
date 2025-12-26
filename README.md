@@ -90,8 +90,29 @@ Response body: empty
 
 Image selection is uniform across the loaded map
 
-Caching behavior is controlled via response headers and can be adjusted
-depending on deployment needs.
+## Cache Control
+
+All image endpoints accept an optional `cache` query parameter to control
+client and CDN caching of the redirect response.
+
+```
+GET /image?cache=1h
+GET /image/after/2024?cache=5m
+GET /image/latest?cache=30s
+GET /image/latest/after/2024?cache=1d
+```
+
+### Supported duration formats
+
+| Suffix | Unit    | Example |
+|--------|---------|---------|
+| `s`    | seconds | `60s`   |
+| `m`    | minutes | `5m`    |
+| `h`    | hours   | `1h`    |
+| `d`    | days    | `7d`    |
+
+When provided, the response includes `Cache-Control: public, max-age={seconds}`.
+When omitted, no cache header is set.
 
 ## Key-Based Filtering & Selection Semantics
 
