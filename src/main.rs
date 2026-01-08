@@ -182,7 +182,15 @@ async fn health(State(state): State<Arc<AppState>>) -> String {
 }
 
 async fn sync_loop(state: Arc<AppState>, url: String, interval: Duration) {
-    let client = reqwest::Client::new();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_static("roulette/1.0"),
+    );
+    let client = reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .expect("failed to build HTTP client");
     loop {
         match client
             .get(&url)
