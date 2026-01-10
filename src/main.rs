@@ -125,6 +125,13 @@ fn filter_after<'a>(keys: &'a [String], bound: &str) -> &'a [String] {
     &keys[start..]
 }
 
+fn maybe_parse_if_changed(content: &str, current_hash: u64) -> Option<ImageMap> {
+    if hash_content(content) == current_hash {
+        return None;
+    }
+    ImageMap::parse(content).ok()
+}
+
 async fn random_image(State(state): State<Arc<AppState>>, Query(q): Query<CacheQuery>) -> Response {
     let cache = q.cache.as_deref().and_then(parse_duration);
     let guard = state.image_map.read().unwrap();
@@ -200,16 +207,10 @@ async fn sync_loop(state: Arc<AppState>, url: String, interval: Duration) {
         {
             Ok(resp) => match resp.text().await {
                 Ok(content) => {
-                    let new_hash = hash_content(&content);
-                    if new_hash == state.image_map.read().unwrap().content_hash {
-                        continue;
-                    }
-                    match ImageMap::parse(&content) {
-                        Ok(new_map) => {
-                            info!(images = new_map.sorted_keys.len(), "synced image map");
-                            *state.image_map.write().unwrap() = new_map;
-                        }
-                        Err(e) => warn!(error = %e, "sync failed: invalid JSON"),
+                    let current_hash = state.image_map.read().unwrap().content_hash;
+                    if let Some(new_map) = maybe_parse_if_changed(&content, current_hash) {
+                        info!(images = new_map.sorted_keys.len(), "synced image map");
+                        *state.image_map.write().unwrap() = new_map;
                     }
                 }
                 Err(e) => warn!(error = %e, "sync failed: read error"),

@@ -123,3 +123,24 @@ fn parse_duration_invalid() {
     assert_eq!(parse_duration("invalid"), None);
     assert_eq!(parse_duration("10x"), None);
 }
+
+#[test]
+fn sync_returns_none_when_hash_matches() {
+    let content = r#"{"a.jpg": "b.jpg"}"#;
+    let hash = hash_content(content);
+    assert!(maybe_parse_if_changed(content, hash).is_none());
+}
+
+#[test]
+fn sync_returns_some_when_hash_differs() {
+    let content = r#"{"a.jpg": "b.jpg"}"#;
+    let different_hash = 12345;
+    assert!(maybe_parse_if_changed(content, different_hash).is_some());
+}
+
+#[test]
+fn sync_returns_none_for_invalid_json_even_if_hash_differs() {
+    let content = "not valid json";
+    let different_hash = 12345;
+    assert!(maybe_parse_if_changed(content, different_hash).is_none());
+}
