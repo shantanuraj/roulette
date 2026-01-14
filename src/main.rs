@@ -67,6 +67,7 @@ impl ImageMap {
 struct AppState {
     url_prefix: String,
     image_map: RwLock<ImageMap>,
+    recency_decay: f64,
 }
 
 impl AppState {
@@ -76,9 +77,14 @@ impl AppState {
             .map(|p| fs::read_to_string(p).expect("failed to read image map"))
             .unwrap_or_else(|_| EMBEDDED_IMAGE_MAP.to_string());
         let image_map = ImageMap::parse(&content).expect("invalid JSON");
+        let recency_decay = env::var("RECENCY_DECAY")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.05);
         Self {
             url_prefix,
             image_map: RwLock::new(image_map),
+            recency_decay,
         }
     }
 
@@ -110,11 +116,10 @@ fn select_uniform(keys: &[String]) -> Option<&str> {
     Some(&keys[thread_rng().gen_range(0..keys.len())])
 }
 
-fn select_biased(keys: &[String]) -> Option<&str> {
+fn select_biased(keys: &[String], decay: f64) -> Option<&str> {
     if keys.is_empty() {
         return None;
     }
-    let decay = 0.05;
     let weights: Vec<f64> = (0..keys.len()).map(|i| (i as f64 * decay).exp()).collect();
     let dist = WeightedIndex::new(&weights).ok()?;
     Some(&keys[thread_rng().sample(dist)])
@@ -158,7 +163,7 @@ async fn random_image_after(
 async fn latest_image(State(state): State<Arc<AppState>>, Query(q): Query<CacheQuery>) -> Response {
     let cache = q.cache.as_deref().and_then(parse_duration);
     let guard = state.image_map.read().unwrap();
-    match select_biased(&guard.sorted_keys) {
+    match select_biased(&guard.sorted_keys, state.recency_decay) {
         Some(key) => state.redirect(key, &guard.map, cache),
         None => StatusCode::NOT_FOUND.into_response(),
     }
@@ -172,7 +177,7 @@ async fn latest_image_after(
     let cache = q.cache.as_deref().and_then(parse_duration);
     let guard = state.image_map.read().unwrap();
     let keys = filter_after(&guard.sorted_keys, &bound);
-    match select_biased(keys) {
+    match select_biased(keys, state.recency_decay) {
         Some(key) => state.redirect(key, &guard.map, cache),
         None => StatusCode::NOT_FOUND.into_response(),
     }

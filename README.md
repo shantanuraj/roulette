@@ -20,14 +20,15 @@ Client → GET /image → roulette → 302 redirect → Asset host (S3, CDN, etc
 
 ## Configuration
 
-| Variable                  | Required | Description                                 |
-| ------------------------- | -------- | ------------------------------------------- |
-| `IMAGE_URL_PREFIX`        | yes      | Base URL for image filenames                |
-| `IMAGE_MAP_PATH`          | no       | Path to JSON map (default: embedded)        |
-| `IMAGE_MAP_SYNC_URL`      | no       | URL to fetch updated map from               |
-| `IMAGE_MAP_SYNC_INTERVAL` | no       | Sync interval in seconds                    |
-| `PORT`                    | no       | HTTP port (default: `8080`)                 |
-| `RUST_LOG`                | no       | Log level (e.g. `info`, `tower_http=debug`) |
+| Variable                  | Required | Description                                            |
+| ------------------------- | -------- | ------------------------------------------------------ |
+| `IMAGE_URL_PREFIX`        | yes      | Base URL for image filenames                           |
+| `IMAGE_MAP_PATH`          | no       | Path to JSON map (default: embedded)                   |
+| `IMAGE_MAP_SYNC_URL`      | no       | URL to fetch updated map from                          |
+| `IMAGE_MAP_SYNC_INTERVAL` | no       | Sync interval in seconds                               |
+| `RECENCY_DECAY`           | no       | Exponential decay rate for `/latest` (default: `0.05`) |
+| `PORT`                    | no       | HTTP port (default: `8080`)                            |
+| `RUST_LOG`                | no       | Log level (e.g. `info`, `tower_http=debug`)            |
 
 ## Image Map
 

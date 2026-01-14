@@ -77,13 +77,13 @@ fn select_uniform_returns_valid_key() {
 
 #[test]
 fn select_biased_empty() {
-    assert!(select_biased(&[]).is_none());
+    assert!(select_biased(&[], 0.05).is_none());
 }
 
 #[test]
 fn select_biased_returns_valid_key() {
     let keys = test_keys();
-    let selected = select_biased(&keys).unwrap();
+    let selected = select_biased(&keys, 0.05).unwrap();
     assert!(keys.iter().any(|k| k == selected));
 }
 
