@@ -188,6 +188,14 @@ async fn health(State(state): State<Arc<AppState>>) -> String {
         .to_string()
 }
 
+async fn robots() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/plain")],
+        "User-agent: *\nDisallow: /\n",
+    )
+}
+
 async fn sync_loop(state: Arc<AppState>, url: String, interval: Duration) {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
@@ -271,6 +279,7 @@ async fn main() {
         .route("/image/after/{bound}", get(random_image_after))
         .route("/image/latest", get(latest_image))
         .route("/image/latest/after/{bound}", get(latest_image_after))
+        .route("/robots.txt", get(robots))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
     let port: u16 = env::var("PORT")
